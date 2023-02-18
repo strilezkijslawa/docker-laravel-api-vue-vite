@@ -1,0 +1,48 @@
+FROM phusion/baseimage:focal-1.2.0
+
+ENV TZ              Europe/Kiev
+RUN locale-gen      en_US.UTF-8
+ENV LANG            en_US.UTF-8
+ENV LC_ALL          en_US.UTF-8
+ENV DEBIAN_FRONTEND noninteractive
+ENV HOME            /root
+WORKDIR             /www
+
+# Use baseimage-docker's init system.
+CMD ["/sbin/my_init"]
+
+# Avoid ERROR: invoke-rc.d: policy-rc.d denied execution of start.
+RUN sed -i "s/^exit 101$/exit 0/" /usr/sbin/policy-rc.d
+
+RUN apt-get update && \
+    apt-get -yq install build-essential \
+        software-properties-common \
+        wget unzip libicu-dev git libmagickwand-dev imagemagick && \
+        add-apt-repository ppa:git-core/ppa -y && \
+        add-apt-repository ppa:ondrej/php -y && \
+        apt-get update && apt-get install -y \
+            php8.1-cli php8.1-fpm php8.1-intl php8.1-xml php8.1-zip php8.1-gd php8.1-mbstring \
+            php8.1-mysql php8.1-curl php8.1-imagick php8.1-sqlite3 \
+            jpegoptim optipng pngquant gifsicle
+
+RUN sed -i "s/listen = \(.*\)\+/listen = 9000/" /etc/php/8.1/fpm/pool.d/www.conf
+
+COPY docker/php.ini /etc/php/8.1/fpm/
+ADD https://getcomposer.org/composer.phar /usr/bin/composer
+RUN chmod 0755 /usr/bin/composer
+
+RUN service php8.1-fpm start
+
+RUN mkdir /etc/service/php-fpm
+ADD docker/runit/php-fpm.sh /etc/service/php-fpm/run
+
+RUN chmod a+x /etc/service/php-fpm/run
+
+#
+RUN crontab -l | { cat; echo "* * * * * /sbin/setuser www-data /usr/bin/php /www/artisan schedule:run >> /www/storage/logs/schedule.log"; } | crontab -
+
+#
+EXPOSE 9000 9051
+
+# Clean up APT when done.
+RUN apt-get clean && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
